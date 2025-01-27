@@ -1,4 +1,8 @@
-﻿using Mono.Cecil;
+﻿// ILUtilities/BinaryModifier.cs
+using System;
+using System.Linq;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace ReSharp2
 {
@@ -11,55 +15,133 @@ namespace ReSharp2
             _assembly = assembly ?? throw new ArgumentNullException(nameof(assembly));
         }
 
-        /// <summary>
-        /// Renames a type in the assembly.
-        /// </summary>
-        /// <param name="originalFullName">The original full name of the type.</param>
-        /// <param name="newName">The new name for the type.</param>
-        public void RenameType(string originalFullName, string newName)
-        {
-            var type = _assembly.MainModule.Types.FirstOrDefault(t => t.FullName == originalFullName);
-            if (type == null)
-                throw new InvalidOperationException($"Type '{originalFullName}' not found.");
+        // Existing methods...
 
-            type.Name = newName;
+        /// <summary>
+        /// Creates a new method within a specified type.
+        /// </summary>
+        /// <param name="typeFullName">Full name of the type to add the method to.</param>
+        /// <param name="methodName">Name of the new method.</param>
+        /// <param name="returnTypeFullName">Full name of the return type.</param>
+        /// <param name="parameters">Optional array of parameter definitions.</param>
+        /// <returns>The newly created MethodDefinition.</returns>
+        public MethodDefinition CreateMethod(
+            string typeFullName,
+            string methodName,
+            string returnTypeFullName,
+            ParameterDefinition[] parameters = null)
+        {
+            var type = _assembly.MainModule.Types.FirstOrDefault(t => t.FullName == typeFullName);
+            if (type == null)
+                throw new InvalidOperationException($"Type '{typeFullName}' not found.");
+
+            // Resolve return type
+            TypeReference returnType = ResolveType(returnTypeFullName);
+
+            // Create method attributes (public and hidebysig)
+            var methodAttributes = MethodAttributes.Public | MethodAttributes.HideBySig;
+
+            // Define the method
+            var newMethod = new MethodDefinition(methodName, methodAttributes, returnType);
+
+            // Add parameters if any
+            if (parameters != null)
+            {
+                foreach (var param in parameters)
+                {
+                    newMethod.Parameters.Add(param);
+                }
+            }
+
+            // Initialize method body with an empty IL processor
+            var ilProcessor = newMethod.Body.GetILProcessor();
+
+            // Optional: Initialize with a default return (e.g., 'ret' for void)
+            if (returnType.FullName == _assembly.MainModule.TypeSystem.Void.FullName)
+            {
+                ilProcessor.Append(ilProcessor.Create(OpCodes.Ret));
+            }
+
+            // Add the new method to the type
+            type.Methods.Add(newMethod);
+
+            return newMethod;
         }
 
         /// <summary>
-        /// Renames a method within a specified type.
+        /// Writes IL instructions to a method's body.
         /// </summary>
         /// <param name="typeFullName">Full name of the type containing the method.</param>
-        /// <param name="originalMethodName">Original method name.</param>
-        /// <param name="newMethodName">New method name.</param>
-        public void RenameMethod(string typeFullName, string originalMethodName, string newMethodName)
+        /// <param name="methodName">Name of the method to modify.</param>
+        /// <param name="instructions">Array of IL instructions to add.</param>
+        public void WriteMethodIL(string typeFullName, string methodName, OpCodeInstruction[] instructions)
         {
             var type = _assembly.MainModule.Types.FirstOrDefault(t => t.FullName == typeFullName);
             if (type == null)
                 throw new InvalidOperationException($"Type '{typeFullName}' not found.");
 
-            var method = type.Methods.FirstOrDefault(m => m.Name == originalMethodName);
+            var method = type.Methods.FirstOrDefault(m => m.Name == methodName);
             if (method == null)
-                throw new InvalidOperationException($"Method '{originalMethodName}' not found in type '{typeFullName}'.");
+                throw new InvalidOperationException($"Method '{methodName}' not found in type '{typeFullName}'.");
 
-            method.Name = newMethodName;
+            if (!method.HasBody)
+                method.Body.InitLocals = true; // Initialize locals if not present
+
+            var ilProcessor = method.Body.GetILProcessor();
+            method.Body.Instructions.Clear(); // Clear existing instructions
+
+            foreach (var opInstr in instructions)
+            {
+                Instruction instruction;
+
+                // Handle different operand types
+                if (opInstr.Operand == null)
+                {
+                    instruction = ilProcessor.Create(opInstr.OpCode);
+                }
+                else if (opInstr.Operand is string str)
+                {
+                    instruction = ilProcessor.Create(opInstr.OpCode, str);
+                }
+                else if (opInstr.Operand is int i)
+                {
+                    instruction = ilProcessor.Create(opInstr.OpCode, i);
+                }
+                else if (opInstr.Operand is MethodReference methodRef)
+                {
+                    instruction = ilProcessor.Create(opInstr.OpCode, methodRef);
+                }
+                else if (opInstr.Operand is TypeReference typeRef)
+                {
+                    instruction = ilProcessor.Create(opInstr.OpCode, typeRef);
+                }
+                else
+                {
+                    throw new NotSupportedException($"Operand type '{opInstr.Operand.GetType()}' is not supported.");
+                }
+
+                ilProcessor.Append(instruction);
+            }
         }
 
         /// <summary>
-        /// Inserts a new field into a specified type.
+        /// Resolves a type by its full name.
         /// </summary>
         /// <param name="typeFullName">Full name of the type.</param>
-        /// <param name="fieldName">Name of the new field.</param>
-        /// <param name="fieldTypeFullName">Full name of the field's type.</param>
-        public void InsertField(string typeFullName, string fieldName, string fieldTypeFullName)
+        /// <returns>TypeReference of the resolved type.</returns>
+        private TypeReference ResolveType(string typeFullName)
         {
-            var type = _assembly.MainModule.Types.FirstOrDefault(t => t.FullName == typeFullName);
-            if (type == null)
-                throw new InvalidOperationException($"Type '{typeFullName}' not found.");
+            // Attempt to get the type from the current module
+            var type = _assembly.MainModule.GetType(typeFullName);
+            if (type != null)
+                return type;
 
-            var fieldType = _assembly.MainModule.ImportReference(Type.GetType(fieldTypeFullName) ?? throw new InvalidOperationException($"Type '{fieldTypeFullName}' not found."));
+            // Attempt to resolve from mscorlib or System assemblies
+            var systemType = Type.GetType(typeFullName);
+            if (systemType != null)
+                return _assembly.MainModule.ImportReference(systemType);
 
-            var newField = new FieldDefinition(fieldName, FieldAttributes.Public, fieldType);
-            type.Fields.Add(newField);
+            throw new InvalidOperationException($"Type '{typeFullName}' could not be resolved.");
         }
 
         /// <summary>
@@ -72,6 +154,21 @@ namespace ReSharp2
                 throw new ArgumentException("Output path cannot be null or empty.", nameof(outputPath));
 
             _assembly.Write(outputPath);
+        }
+    }
+
+    /// <summary>
+    /// Represents an IL instruction with an OpCode and an optional operand.
+    /// </summary>
+    public class OpCodeInstruction
+    {
+        public OpCode OpCode { get; set; }
+        public object Operand { get; set; }
+
+        public OpCodeInstruction(OpCode opCode, object operand = null)
+        {
+            OpCode = opCode;
+            Operand = operand;
         }
     }
 }

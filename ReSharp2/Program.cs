@@ -1,4 +1,5 @@
 ﻿using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace ReSharp2
 {
@@ -9,7 +10,7 @@ namespace ReSharp2
             // Check if at least one argument is provided
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: ReSharp <path_to_assembly>");
+                Console.WriteLine("Usage: ILUtilitiesDemo <path_to_assembly>");
                 return;
             }
 
@@ -62,31 +63,82 @@ namespace ReSharp2
                 Console.WriteLine();
             }
 
-            // Example modifications
+            // Initialize BinaryModifier
             var modifier = new BinaryModifier(assembly);
 
             try
             {
-                // Rename a type (Replace with actual type name from your assembly)
+                // Example Modifications:
+
+                // 1. Rename a type (Replace with actual type name from your assembly)
                 // Example: modifier.RenameType("MyApp.Program", "MyApp.MainProgram");
 
-                // Rename a method (Replace with actual type and method names)
+                // 2. Rename a method (Replace with actual type and method names)
                 // Example: modifier.RenameMethod("MyApp.MainProgram", "Main", "Start");
 
-                // Insert a new field (Replace with actual type and desired field details)
+                // 3. Insert a new field (Replace with actual type and desired field details)
                 // Example: modifier.InsertField("MyApp.MainProgram", "NewField", "System.Int32");
 
                 // Uncomment and modify the above examples as needed
 
+                // 4. Create a new method
+                CreateAndAddNewMethod(modifier, assembly);
+
                 // Save the modified assembly
                 string outputPath = Path.Combine(Path.GetDirectoryName(assemblyPath), "Modified_" + Path.GetFileName(assemblyPath));
                 modifier.SaveAssembly(outputPath);
-                Console.WriteLine($"Modified assembly saved to: {outputPath}");
+                Console.WriteLine($"\nModified assembly saved to: {outputPath}");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error modifying assembly: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Creates a new method and adds IL instructions to its body.
+        /// </summary>
+        /// <param name="modifier">Instance of BinaryModifier.</param>
+        /// <param name="assembly">The AssemblyDefinition being modified.</param>
+        private static void CreateAndAddNewMethod(BinaryModifier modifier, AssemblyDefinition assembly)
+        {
+            // Define the target type where the new method will be added
+            string targetTypeFullName = "MyApp.Program"; // Replace with actual type name
+
+            // Define the new method's signature
+            string newMethodName = "Greet";
+            string returnType = "System.Void";
+            var parameters = new ParameterDefinition[]
+            {
+                new ParameterDefinition("name", ParameterAttributes.None, assembly.MainModule.TypeSystem.String)
+            };
+
+            // Create the new method
+            var newMethod = modifier.CreateMethod(targetTypeFullName, newMethodName, returnType, parameters);
+            Console.WriteLine($"Created new method: {newMethod.FullName}");
+
+            // Define IL instructions for the new method
+            var instructions = new List<OpCodeInstruction>
+            {
+                // Load the 'name' argument onto the stack
+                new OpCodeInstruction(OpCodes.Ldarg_1),
+
+                // Load the string "Hello, " onto the stack
+                new OpCodeInstruction(OpCodes.Ldstr, "Hello, "),
+
+                // Concatenate the two strings
+                new OpCodeInstruction(OpCodes.Call, assembly.MainModule.ImportReference(typeof(string).GetMethod("Concat", new Type[] { typeof(string), typeof(string) }))),
+
+                // Call Console.WriteLine(string)
+                new OpCodeInstruction(OpCodes.Call, assembly.MainModule.ImportReference(typeof(Console).GetMethod("WriteLine", new Type[] { typeof(string) }))),
+
+                // Return
+                new OpCodeInstruction(OpCodes.Ret)
+            };
+
+            // Write IL instructions to the new method
+            modifier.WriteMethodIL(targetTypeFullName, newMethodName, instructions.ToArray());
+            Console.WriteLine($"Added IL instructions to method: {newMethodName}");
         }
 
         /// <summary>
