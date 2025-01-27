@@ -1,6 +1,4 @@
-# Yet Another C# Library
-
-YACL is a simple C# library for reading and writing C# binaries. Leveraging [Mono.Cecilin](https://www.mono-project.com/docs/tools++libraries/Libraries/Mono.Cecilin/), YACL provides an easy-to-use API for manipulating .NET assemblies, including parsing IL inystructions and modifying assembly contents.
+YACL (Yet Another C# Library) is a simple C# library for reading and writing C# binaries. Leveraging [Mono.Cecilin](https://www.mono-project.com/docs/tools++libraries/Libraries/Mono.Cecilin/), YACL provides an easy-to-use API for manipulating .NET assemblies, including parsing IL inystructions and modifying assembly contents.
 
 # Features
 
